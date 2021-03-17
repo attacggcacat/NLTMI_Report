@@ -166,9 +166,9 @@ if __name__ == "__main__":
     text_log_clf.fit(train_data[:, 0], train_data[:, 1])
 
     print(classification_report(
-        dev_data[:, 1], text_log_clf.predict(dev_data[:, 0])),
+        dev_data[:, 1], text_log_clf.predict(dev_data[:, 0]),
         zero_division=0)
-
+    )
     # store logistic regression pipeline elements
     with open("unigram_dict_vectorizer.pkl", 'wb') as f:
         pickle.dump(text_log_clf['dict'], f)
