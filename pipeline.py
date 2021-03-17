@@ -1,22 +1,27 @@
+# general purpose imports
 import os.path as path
 import random
+import numpy as np
+
+# imports for feature funtion
 from collections import Counter
+from sklearn.base import TransformerMixin
+
+# imports for file size management
 from tempfile import mkdtemp
 
-import numpy as np
-# import torch
-import pickle
-from sklearn.base import TransformerMixin
+# imports for pipeline
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.pipeline import Pipeline
 
-# from torch.autograd import Variable
-# from torch.nn import functional as F
-# from torch.utils.data import DataLoader
+# import for performance measurements
+from sklearn.metrics import classification_report
+
+# import for model storage
+import pickle
 
 SEED = 42
 
@@ -24,6 +29,9 @@ SEED = 42
 
 
 def prepare_corpus(mode='train', train_partition=1., n_samples=117500):
+    """ load corpus into numpy arrays"""
+
+
     filename = path.join(mkdtemp(), 'array.dat')
     fp = np.memmap(filename, dtype='object', mode='w+', shape=(n_samples, 2))
 
@@ -116,6 +124,8 @@ class FF(TransformerMixin):
 
 
 if __name__ == "__main__":
+
+    # create Logistic Regression pipeline
     text_log_clf = Pipeline(
         [
             ('ff', FF(
@@ -130,6 +140,7 @@ if __name__ == "__main__":
         ]
     )
 
+    # create Naive Bayes pipeline
     text_nbc_clf = Pipeline(
         [
             ('ff', FF(
@@ -143,17 +154,22 @@ if __name__ == "__main__":
             ('NBC', MultinomialNB(alpha=0.5)),
         ]
     )
-    # create dataloaders
-    print('preparing corpus')
-    n_samples = 117500
-    train_partition = 0.75
-    n_train_samples = int(train_partition * n_samples)
 
-    train_data, dev_data = prepare_corpus(
-        'train', train_partition, n_samples=n_samples)
+    print('preparing corpus')
+
+    # read out datasets
+    train_data, dev_data = prepare_corpus('train', 0.75)
 
     print(train_data[:1,])
+
+    # fit logistic regression
     text_log_clf.fit(train_data[:, 0], train_data[:, 1])
+
+    print(classification_report(
+        dev_data[:, 1], text_log_clf.predict(dev_data[:, 0])),
+        zero_division=0)
+
+    # store logistic regression pipeline elements
     with open("unigram_dict_vectorizer.pkl", 'wb') as f:
         pickle.dump(text_log_clf['dict'], f)
 
@@ -162,8 +178,3 @@ if __name__ == "__main__":
 
     with open("unigram_logreg.pkl", 'wb') as f:
         pickle.dump(text_log_clf['clf'], f)
-        
-    print(classification_report(
-        dev_data[:, 1], text_log_clf.predict(dev_data[:, 0]),
-        zero_division=0)
-    )
