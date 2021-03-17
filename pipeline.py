@@ -1,64 +1,73 @@
-# for feature function
-from sklearn.base import TransformerMixin
-from collections import Counter
-
-# for the pipeline
-from sklearn.pipeline import Pipeline
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.feature_extraction.text import TfidfTransformer
-from sklearn.feature_extraction import DictVectorizer
-
-# visualisation tools
-from sklearn.metrics import classification_report
-import matplotlib.pyplot as plt
-from sklearn.metrics import plot_confusion_matrix
-
-# general imports
+# general purpose imports
+import os.path as path
+import random
 import numpy as np
 
-# for storing model
+# imports for feature funtion
+from collections import Counter
+from sklearn.base import TransformerMixin
+
+# imports for file size management
+from tempfile import mkdtemp
+
+# imports for pipeline
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.feature_extraction import DictVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
+
+# import for performance measurements
+from sklearn.metrics import classification_report
+
+# import for model storage
 import pickle
 
 SEED = 42
 
 # heavily inspired by assignment 2's prepare_corpus
-def read_corpus(mode='train', train_partition=1.):
-
-    # read the texts and their labels
-    f_doc_examples = open(f'x_{mode}.txt', 'r')
-    f_doc_labels = open(f'y_{mode}.txt', 'r')
 
 
-    # pair language segments with their label
-    pairs = []
+def prepare_corpus(mode='train', train_partition=1., n_samples=117500):
+    """ load corpus into numpy arrays"""
 
 
-    # USING SMALL PART OF DATASET
-    for i in range(8000):
-        example = f_doc_examples.readline()
-        label = f_doc_labels.readline()
+    filename = path.join(mkdtemp(), 'array.dat')
+    fp = np.memmap(filename, dtype='object', mode='w+', shape=(n_samples, 2))
 
-        # discard last newline character
-        example = example[:-1]
-        label = label[:-1]
+    with open(f'x_{mode}.txt', 'r') as f_doc_examples, \
+            open(f'y_{mode}.txt', 'r') as f_doc_labels:
 
-        pairs.append((example, label))
+        for i in range(n_samples):
+            example = f_doc_examples.readline().rstrip('\n')
+            label = f_doc_labels.readline().rstrip('\n')
+            fp[i, ] = (example, label)
 
-    pairs = np.array(pairs)
-
-    # randomly shuffle pairs
     rng = np.random.RandomState(SEED)
-    rng.shuffle(pairs)
+    rng.shuffle(fp)
+    fp.flush()
 
-    # split into train and devset
-    num_pairs = pairs.shape[0]
+    if mode == 'train':
+        train_filename = path.join(mkdtemp(), 'train.dat')
+        training = np.memmap(
+            train_filename, dtype='object', mode='w+',
+            shape=(int(train_partition * n_samples), 2)
+        )
+        training = fp[:int(n_samples * train_partition)]
+        training.flush()
 
-    training = pairs[0:int(num_pairs * train_partition),:]
+        dev_filename = path.join(mkdtemp(), 'dev.dat')
+        dev = np.memmap(
+            dev_filename, dtype='object', mode='w+',
+            shape=(n_samples - int(train_partition * n_samples), 2)
+        )
+        dev = fp[int(n_samples * train_partition):]
+        dev.flush
 
-    dev = pairs[int(num_pairs * train_partition):,:]
+        return training, dev
 
-    return training, dev
+    else:
+        return filename
 
 
 # from assignment 2
@@ -77,7 +86,6 @@ class FF(TransformerMixin):
         """
         self._lowercase = lowercase
         self._byte_unigrams = byte_unigrams
-
 
     def _ff(self, string):
         """
@@ -114,37 +122,59 @@ class FF(TransformerMixin):
         """Here we transform each input (a string) into a python dict full of features"""
         return [self._ff(s) for s in X]
 
-def main():
-    text_clf = Pipeline(
+
+if __name__ == "__main__":
+
+    # create Logistic Regression pipeline
+    text_log_clf = Pipeline(
         [
             ('ff', FF(
                 lowercase=True,
                 byte_unigrams=True,
-                )
+            )
             ),
-            ('dict', DictVectorizer()),   # This will convert python dicts into efficient sparse data structures
+            # This will convert python dicts into efficient sparse data structures
+            ('dict', DictVectorizer()),
             ('tfidf', TfidfTransformer()),
             ('clf', LogisticRegression(max_iter=500, verbose=2, C=100., solver='sag')),
         ]
     )
 
-    # create dataloaders
-    train_data, dev_data = read_corpus('train', 0.75)
-    test_data, _ = read_corpus('test')
+    # create Naive Bayes pipeline
+    text_nbc_clf = Pipeline(
+        [
+            ('ff', FF(
+                lowercase=True,
+                byte_unigrams=True,
+            )
+            ),
+            # This will convert python dicts into efficient sparse data structures
+            ('dict', DictVectorizer()),
+            ('tfidf', TfidfTransformer()),
+            ('NBC', MultinomialNB(alpha=0.5)),
+        ]
+    )
 
-    text_clf.fit(train_data[:, 0], train_data[:, 1])  # this make take a moment with large corpora and/or large feature sets
+    print('preparing corpus')
 
-    with open("unigram_dict_vectorizer.pkl", 'wb') as file:
-        pickle.dump(text_clf['dict'], file)
+    # read out datasets
+    train_data, dev_data = prepare_corpus('train', 0.75)
 
-    with open("unigram_tfidf.pkl", 'wb') as file:
-        pickle.dump(text_clf['tfidf'], file)
+    print(train_data[:1,])
 
-    with open("unigram_logreg.pkl", 'wb') as file:
-        pickle.dump(text_clf['clf'], file)
+    # fit logistic regression
+    text_log_clf.fit(train_data[:, 0], train_data[:, 1])
 
-    print(classification_report(dev_data[:,1], text_clf.predict(dev_data[:, 0])))
+    print(classification_report(
+        dev_data[:, 1], text_log_clf.predict(dev_data[:, 0])),
+        zero_division=0)
 
+    # store logistic regression pipeline elements
+    with open("unigram_dict_vectorizer.pkl", 'wb') as f:
+        pickle.dump(text_log_clf['dict'], f)
 
-if __name__ == "__main__":
-    main()
+    with open("unigram_tfidf.pkl", 'wb') as f:
+        pickle.dump(text_log_clf['tfidf'], f)
+
+    with open("unigram_logreg.pkl", 'wb') as f:
+        pickle.dump(text_log_clf['clf'], f)
